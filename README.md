@@ -6,7 +6,18 @@ A production-ready FastAPI project for managing background task queues using [AR
 
 This project uses ARQ instead of Celery because the task functions are asynchronous (`async def`). ARQ is designed for asyncio-based Python code and integrates seamlessly with async frameworks like FastAPI. In contrast, using Celery with async tasks requires additional setup and third-party libraries (such as `aio-celery`), making ARQ a simpler and more natural fit for async workloads.
 
-## Features
+## Other ARQ Features
+
+- **Non-blocking:**
+  ARQ is built using Python 3’s asyncio, allowing non-blocking job enqueuing and execution. Multiple jobs (potentially hundreds) can be run simultaneously using a pool of asyncio Tasks.
+
+- **Powerful features:**
+  Deferred execution, easy retrying of jobs, and pessimistic execution make ARQ great for critical jobs that must be completed.
+
+- **Fast:**
+  Asyncio and no forking make ARQ around 7x faster than RQ for short jobs with no I/O. With I/O, that might increase to around 40x faster. (TODO: Add benchmarks)
+
+## Project Features
 
 - Asynchronous background task processing with ARQ for reliable job execution.
 - FastAPI endpoints to enqueue tasks (`/tasks/add`, `/tasks/divide`, `/tasks/long_call`, `/tasks/scheduled_add`) and retrieve job status (`/jobs/{job_id}`).
@@ -66,7 +77,7 @@ uvicorn main:app --reload --port 5000
 To start the ARQ worker that processes background tasks, run the following command in a separate terminal:
 
 ```bash
-arq worker:WorkerSettings
+arq worker.WorkerSettings
 ```
 
 ### Example: Enqueue an Addition Task
