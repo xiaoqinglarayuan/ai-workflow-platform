@@ -116,7 +116,7 @@ class WorkerSettings:
     on_startup = startup
     on_shutdown = shutdown
     after_job_end = save_job_history_to_db
-    keep_result_forever = True
+    keep_result = 300  # Keep job results for 5 minutes (300 seconds)
     max_jobs = 100
     max_tries = 3
     queue_name = config.WORKER_QUEUE
