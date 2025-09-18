@@ -8,10 +8,10 @@ from httpx import AsyncClient
 from config import get_settings
 from database.connection import get_db
 from schemas.models import JobHistoryCreate
-from tasks import add, divide, long_call, scheduled_add
+from tasks import add, always_fail, divide, long_call, scheduled_add
 from utils.date_parser import parse_datetime_str
 from utils.job_info import process_job_info
-from utils.job_info_crud import create_job_history
+from utils.job_info_crud import create_job_history, get_job_history, update_job_history
 
 # Configuration settings
 config = get_settings()
@@ -58,7 +58,7 @@ async def save_job_history_to_db(ctx: dict):
 
     # Fetch comprehensive job information using the utility function.
     # process_job_info is expected to return a JobStatusResponse Pydantic model.
-    job_info = await process_job_info(job)
+    job_info = await process_job_info(job=job, ctx=ctx)
 
     # If job_info couldn't be retrieved (e.g., job details not found in Redis), log and exit.
     if not job_info:
@@ -101,9 +101,16 @@ async def save_job_history_to_db(ctx: dict):
     try:
         db = next(db_gen)  # Get the session
 
-        # Call the CRUD function to create the job history record in the database.
-        # This function should handle adding the object to the session and committing.
-        create_job_history(db=db, job_history_in=job_history_to_save)
+        # --- UPSERT LOGIC ---
+        # Check if a record for this job history job_id already exists
+        existing_job = get_job_history(db=db, job_id=job_id)
+
+        if existing_job:
+            # If it exists, update it with the latest information
+            update_job_history(db=db, job_id=job_id, job_history_update_in=job_history_to_save)
+        else:
+            # If it does not exist, create a new job history record
+            create_job_history(db=db, job_history_in=job_history_to_save)
 
     except Exception as e_db:
         # Consider using logger.error with exc_info=True
@@ -112,12 +119,12 @@ async def save_job_history_to_db(ctx: dict):
 
 # Worker settings for ARQ
 class WorkerSettings:
-    functions = [long_call, add, divide, scheduled_add]
+    functions = [long_call, add, divide, scheduled_add, always_fail]
     on_startup = startup
     on_shutdown = shutdown
     after_job_end = save_job_history_to_db
     keep_result = 300  # Keep job results for 5 minutes (300 seconds)
-    max_jobs = 100
+    max_jobs = 10
     max_tries = 3
     queue_name = config.WORKER_QUEUE
     redis_settings = REDIS_SETTINGS
