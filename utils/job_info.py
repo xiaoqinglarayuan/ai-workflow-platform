@@ -1,11 +1,12 @@
 import asyncio
+from typing import Optional
 
 from arq.jobs import Job
 
 from models import JobStatusResponse
 
 
-async def process_job_info(job: Job) -> None | JobStatusResponse:
+async def process_job_info(job: Job, ctx: Optional[dict] = None) -> None | JobStatusResponse:
     start_time = None
 
     # Get job info and result_info
@@ -20,6 +21,15 @@ async def process_job_info(job: Job) -> None | JobStatusResponse:
     # Set enqueue_time as start_time if available
     start_time = getattr(job_info, "enqueue_time", None)
 
+    # Use ctx for attempts if available
+    attempts = None
+    if ctx and "job_try" in ctx:
+        attempts = ctx["job_try"]
+    else:
+        attempts = getattr(job_info, "job_try", None)
+
+    print(f"Processing job info for job_id {job.job_id}: {job_info=}, {status=}")
+
     # Prepare data for response model
     data = {
         "job_id": job.job_id,
@@ -32,7 +42,7 @@ async def process_job_info(job: Job) -> None | JobStatusResponse:
         "function": getattr(job_info, "function", None),
         "args": str(getattr(job_info, "args", "")),
         "error": None,
-        "attempts": getattr(job_info, "job_try", 0),
+        "attempts": attempts,
     }
 
     # Extract timestamps
