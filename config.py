@@ -5,6 +5,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
     # Only define the one “broker” env var in HOST:PORT format
     REDIS_BROKER: str = Field(
         "localhost:6379",
@@ -25,6 +26,10 @@ class Settings(BaseSettings):
     redis_host: str
     redis_port: int
 
+    LLM_BASE_URL: str = "https://api.groq.com/openai/v1"
+    LLM_API_KEY: str = ""        # 真 key 从环境变量 / .env 读,别写死在这
+    LLM_MODEL: str = "llama-3.3-70b-versatile"
+
     # This runs before any other parsing, so we can split out host & port
     @model_validator(mode="before")
     @classmethod
@@ -37,7 +42,8 @@ class Settings(BaseSettings):
         return values
 
     # pydantic v2 way to point to an .env file
-    model_config = SettingsConfigDict(env_file=".env")
+ 
+    
 
 
 @lru_cache

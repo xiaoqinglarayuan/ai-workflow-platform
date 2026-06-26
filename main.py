@@ -47,6 +47,13 @@ async def enqueue_add(request: MathRequest, redis: ArqRedis = Depends(get_redis_
         raise HTTPException(status_code=500, detail="Failed to enqueue job")
     return JobEnqueueResponse(job_id=job.job_id)
 
+@app.post("/tasks/llm", response_model=JobEnqueueResponse)
+async def enqueue_llm(prompt: str, redis: ArqRedis = Depends(get_redis_pool)):
+    job = await redis.enqueue_job("llm_task", prompt)
+    if job is None:
+        raise HTTPException(status_code=500, detail="Failed to enqueue job")
+    return JobEnqueueResponse(job_id=job.job_id)
+
 
 @app.post("/tasks/scheduled_add", response_model=JobEnqueueResponse)
 async def enqueue_scheduled_add(hour: int, min: int, request: MathRequest, redis: ArqRedis = Depends(get_redis_pool)):

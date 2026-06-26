@@ -12,6 +12,7 @@ from config import get_settings
 
 # Configuration settings
 config = get_settings()
+print("KEY loaded:", bool(config.LLM_API_KEY), "| len:", len(config.LLM_API_KEY))
 
 # Configure Redis connection
 REDIS_SETTINGS = RedisSettings(host=config.redis_host, port=config.redis_port)

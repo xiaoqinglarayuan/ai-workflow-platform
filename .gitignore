@@ -1,15 +1,23 @@
+# Secrets
 .env
-.venv/
-.idea/
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
 .pytest_cache/
 
+# Env / IDE
+.venv/
+.idea/
+.DS_Store
 
-.bash_history
-
-
-# Byte-compiled / optimized / DLL files
-__pycache__/
-
-
+# Project data
 database/jobs.db
 database/jobs.db-journal
+
+# Misc
+.bash_history
+*.log
