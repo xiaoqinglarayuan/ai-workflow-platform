@@ -102,43 +102,33 @@ async def get_job_status(job_id: str, db: Session = Depends(get_db), redis: ArqR
     """
 
     # Initialize ARQ Job instance
+    # ① 先查 Postgres(权威、持久)
+    job_history_from_db = get_job_history(db=db, job_id=job_id)
+    if job_history_from_db:
+        start_time_iso = job_history_from_db.start_time.isoformat() if job_history_from_db.start_time else None
+        finish_time_iso = job_history_from_db.finish_time.isoformat() if job_history_from_db.finish_time else None
+        return JobStatusResponse(
+            job_id=job_history_from_db.job_id,
+            status=job_history_from_db.status or "Unknown",
+            success=job_history_from_db.success,
+            result=job_history_from_db.result_payload or {},
+            start_time=start_time_iso,
+            finish_time=finish_time_iso,
+            username=job_history_from_db.username,
+            function=job_history_from_db.function_name,
+            args=job_history_from_db.args_payload,
+            error=job_history_from_db.error_message,
+            attempts=job_history_from_db.attempts,
+        )
+
+    # ② 库里没有 → 任务可能还在跑,查 Redis 拿实时状态
     arq_job = Job(job_id, redis)
-
-    # Try to get job info from ARQ/Redis
     job_info_from_redis = await process_job_info(job=arq_job)
-
     if job_info_from_redis:
-        # If found in Redis, return that information
-        print(f"Job {job_id} found in Redis")
-        # process_job_info already returns JobStatusResponse
         return job_info_from_redis
-    else:
-        # If not found in Redis, check the database
-        job_history_from_db = get_job_history(db=db, job_id=job_id)
 
-        if job_history_from_db:
-            # If found in the database, adapt JobHistoryRead to JobStatusResponse
-            # Note: JobHistoryRead stores datetimes, JobStatusResponse expects ISO strings
-            start_time_iso = job_history_from_db.start_time.isoformat() if job_history_from_db.start_time else None
-            finish_time_iso = job_history_from_db.finish_time.isoformat() if job_history_from_db.finish_time else None
-
-            return JobStatusResponse(
-                job_id=job_history_from_db.job_id,
-                status=job_history_from_db.status or "Unknown",  # Provide a default if status is None
-                success=job_history_from_db.success,
-                result=job_history_from_db.result_payload or {},  # Ensure result is a dict
-                start_time=start_time_iso,
-                finish_time=finish_time_iso,
-                username=job_history_from_db.username,
-                function=job_history_from_db.function_name,
-                args=job_history_from_db.args_payload,
-                error=job_history_from_db.error_message,
-                attempts=job_history_from_db.attempts,
-            )
-        else:
-            # If not found in Redis or the database, raise 404
-            raise HTTPException(status_code=404, detail=f"Job ID '{job_id}' was not found.")
-
+    # ③ 都没有 → 404
+    raise HTTPException(status_code=404, detail=f"Job ID '{job_id}' was not found.")
 
 # Run the application
 if __name__ == "__main__":
