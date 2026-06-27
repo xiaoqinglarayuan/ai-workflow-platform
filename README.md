@@ -1,138 +1,115 @@
-# FastAPI, ARQ + Redis
+# AI Workflow Platform
 
-A production-ready FastAPI project for managing background task queues using [ARQ](https://github.com/samuelcolvin/arq) and Redis. This project demonstrates how to offload long-running or resource-intensive tasks from your FastAPI API to asynchronous workers, enabling scalable and reliable background job execution. It includes queue management endpoints, example producer/consumer patterns, and a modular structure for easy extension.
+An asynchronous LLM task-processing backend: submit a prompt over HTTP, a
+background worker calls a large language model, and the result is persisted to
+PostgreSQL and exposed through a status endpoint.
 
-**Why ARQ and not Celery?**
+Built on top of the async job-queue skeleton from
+[davidmuraya/fastapi-arq](https://github.com/davidmuraya/fastapi-arq); see
+[Attribution](#attribution) for what I added.
 
-This project uses ARQ instead of Celery because the task functions are asynchronous (`async def`). ARQ is designed for asyncio-based Python code and integrates seamlessly with async frameworks like FastAPI. In contrast, using Celery with async tasks requires additional setup and third-party libraries (such as `aio-celery`), making ARQ a simpler and more natural fit for async workloads.
+Status flow: `queued → in_progress → complete | failed`
 
-## Other ARQ Features
+- While a job is **running**, its status lives only in Redis (`in_progress`).
+- When the job **ends**, an `after_job_end` hook writes the final record to
+  PostgreSQL (durable). `GET /jobs/{id}` falls back from Redis to PostgreSQL,
+  so results remain queryable after the Redis result expires.
 
-- **Non-blocking:**
-  ARQ is built using Python 3’s asyncio, allowing non-blocking job enqueuing and execution. Multiple jobs (potentially hundreds) can be run simultaneously using a pool of asyncio Tasks.
+## Tech stack
 
-- **Powerful features:**
-  Deferred execution, easy retrying of jobs, and pessimistic execution make ARQ great for critical jobs that must be completed.
+- **FastAPI** — HTTP API (enqueue jobs, query status)
+- **arq** — async task queue (chosen over Celery/RQ because LLM calls are
+  I/O-bound; one async worker process awaits many concurrent calls instead of
+  forking a process per job)
+- **Redis** — arq broker + short-lived job state
+- **PostgreSQL** — durable job history (`job_history` table)
+- **Groq** — LLM provider via an OpenAI-compatible `/chat/completions` endpoint
 
-- **Fast:**
-  Asyncio and no forking make ARQ around 7x faster than RQ for short jobs with no I/O. With I/O, that might increase to around 40x faster. (TODO: Add benchmarks)
+## Getting started
 
-## Project Features
+### Prerequisites
 
-- Asynchronous background task processing with ARQ for reliable job execution.
-- FastAPI endpoints to enqueue tasks (`/tasks/add`, `/tasks/divide`, `/tasks/long_call`, `/tasks/scheduled_add`) and retrieve job status (`/jobs/{job_id}`).
-- Integration with Redis for robust, production-grade queue management.
-- Example producer/consumer patterns:
-    - `add`: Performs addition of two numbers.
-    - `divide`: Performs division of two numbers.
-    - `long_call`: Executes an HTTP GET request with retries.
-    - `scheduled_add`: Performs addition at a scheduled time.
-- Task status and result retrieval via API, checking both Redis and a persistent SQLite database for job history.
-- Modular codebase with clear separation of API, tasks, database models, and configuration.
-- Utilizes SQLModel for database interactions and Pydantic for data validation.
-- Includes startup and shutdown events.
-- Demonstrates how to schedule tasks to run at a specific time using `defer_until`.
-- Implements a database model (`JobHistory`) to persist job details for auditing and monitoring.
+- Python 3.13
+- Redis running locally
+- PostgreSQL running locally, with a database named `aiwf`
 
-## Requirements
+### Setup
 
-- Python 3.8+
-- FastAPI
-- Uvicorn
-- ARQ
-- Redis (for production queue backend)
-- httpx (for async HTTP calls)
-- pydantic
+````bash
+git clone https://github.com/xiaoqinglarayuan/ai-workflow-platform.git
+cd ai-workflow-platform
 
-## Installation
-
-```bash
-git clone https://github.com/davidmuraya/fastapi-arq.git
-cd fastapi-arq
+python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
-```
 
-Ensure you have Redis installed and running on your machine.
+cp .env.example .env
 
-Create a `.env` file in the root directory and add the following lines:
-
-```bash
 REDIS_BROKER=localhost:6379
 WORKER_QUEUE=app-LyiRY47QTMd
-JOBS_DB=database/jobs.db
-```
+LLM_BASE_URL=https://api.groq.com/openai/v1
+LLM_API_KEY=                       #从 https://console.groq.com/keys 获取
+LLM_MODEL=llama-3.3-70b-versatile
+DATABASE_URL=postgresql+asyncpg://postgres:password@localhost:5432/aiwf
 
-## Usage
 
-### Running the project
+### Environment variables (`.env`)
+DATABASE_URL=postgresql+asyncpg://postgres:password@localhost:5432/aiwf
+REDIS_HOST=localhost
+REDIS_PORT=6379
+LLM_BASE_URL=https://api.groq.com/openai/v1
+LLM_API_KEY=your_groq_api_key # get one free at https://console.groq.com/keys
 
-To run the FastAPI application with ARQ worker, follow these steps:
+LLM_MODEL=llama-3.3-70b-versatile
+
+### Create the table
+```bash
+python -c "from database.models import configure; configure()"
+````
+
+### Run (two processes)
 
 ```bash
-uvicorn main:app --reload --port 5000
-```
+# Terminal 1 — API
+uvicorn main:app --reload --port 8000
 
-### Running the ARQ Worker
-
-To start the ARQ worker that processes background tasks, run the following command in a separate terminal:
-
-```bash
+# Terminal 2 — worker
 arq worker.WorkerSettings
 ```
 
-### Example: Enqueue an Addition Task
+Open http://127.0.0.1:8000/docs
+
+## Usage
 
 ```bash
-curl -X POST "http://localhost:5000/tasks/add" -H "Content-Type: application/json" -d "{\"x\": 5, \"y\": 10}"
+# Submit an LLM job
+curl -X POST "http://127.0.0.1:8000/tasks/llm?prompt=Explain async in one sentence"
+# -> {"job_id": "...", "message": "Job successfully queued.", "success": true}
+
+# Poll for the result
+curl http://127.0.0.1:8000/jobs/<job_id>
+# -> {"status": "complete", "result": {"result": "..."}, ...}
 ```
 
-### Example: Check Job Status
+## Design notes
 
-```bash
-curl "http://localhost:5000/jobs/<job_id>"
-```
+- **Why a queue at all?** LLM calls take seconds. Handling them inside the
+  request would block the API under load, so requests return a `job_id`
+  immediately and the work happens in the background.
+- **Why arq over RQ?** LLM calls are I/O-bound. arq is async-native and runs
+  many concurrent `await`s in a single process; RQ forks a process per job.
+- **Why persist to PostgreSQL?** arq stores results in Redis with a TTL, so
+  results disappear after `keep_result` seconds. Writing to PostgreSQL on
+  `after_job_end` makes job history durable and queryable indefinitely.
 
-## Project Structure
+## Attribution
 
-```plaintext
-fastapi-arq/
-├── .env                    # Environment variables (not committed)
-├── .gitignore              # Specifies intentionally untracked files that Git should ignore
-├── config.py               # Environment configuration loading
-├── database/
-│   ├── connection.py       # Database connection setup (engine, session provider)
-│   ├── __init__.py
-│   └── models.py           # SQLModel database table definitions (e.g., JobHistory)
-├── main.py                 # FastAPI application, API endpoints
-├── models.py               # Pydantic models for API requests and responses (e.g., JobStatusResponse)
-├── README.md               # This file: Project documentation
-├── redis_pool.py           # ARQ Redis connection pool dependency
-├── requirements.txt        # Python package dependencies
-├── schemas/
-│   ├── __init__.py
-│   └── models.py           # Pydantic schemas for data validation (e.g., JobHistoryCreate, JobHistoryRead)
-├── tasks.py                # ARQ task definitions (e.g., add, divide)
-├── utils/
-│   ├── date_parser.py      # Utility for parsing datetime strings
-│   ├── events.py           # FastAPI startup/shutdown event handlers
-│   ├── __init__.py
-│   ├── job_info.py         # Utility for processing ARQ job information
-│   └── job_info_crud.py    # CRUD operations for the JobHistory database table
-└── worker.py               # ARQ worker settings and configuration
-```
+This project is built on the async FastAPI + arq queue skeleton from
+[davidmuraya/fastapi-arq](https://github.com/davidmuraya/fastapi-arq) (MIT).
 
-## Configuration
+My contributions on top of the original:
 
-- Configure queue backend and worker settings in `worker.py` and via environment variables (`.env` file).
-
-## External Links
-
-- [ARQ Documentation](https://arq-docs.helpmanual.io/)
-- [FastAPI Documentation](https://fastapi.tiangolo.com/)
-- [SQLModel Documentation](https://sqlmodel.tiangolo.com/)
-- [Pydantic Documentation](https://docs.pydantic.dev/)
-- [Redis Documentation](https://redis.io/)
-- [Uvicorn Documentation](https://www.uvicorn.org/)
+- Integrated an LLM task (`llm_task`) calling Groq
+- Migrated job persistence from SQLite to PostgreSQL
 
 ## License
 
