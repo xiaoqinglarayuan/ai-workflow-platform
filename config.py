@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     LLM_API_KEY: str = ""        # 真 key 从环境变量 / .env 读,别写死在这
     LLM_MODEL: str = "llama-3.3-70b-versatile"
 
+    DATABASE_URL: str = "postgresql+asyncpg://postgres:test1234@localhost:5432/aiwf"   # ← 加这行
+
     # This runs before any other parsing, so we can split out host & port
     @model_validator(mode="before")
     @classmethod
@@ -40,6 +42,11 @@ class Settings(BaseSettings):
         values["redis_host"] = host
         values["redis_port"] = int(port_str)
         return values
+    
+    @property
+    def DATABASE_URL_SYNC(self) -> str:
+    # 把异步驱动换成同步驱动,供建表/同步会话用
+        return self.DATABASE_URL.replace("+asyncpg", "+psycopg2")
 
     # pydantic v2 way to point to an .env file
  
