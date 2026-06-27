@@ -50,16 +50,7 @@ LLM_BASE_URL=https://api.groq.com/openai/v1
 LLM_API_KEY=                       #从 https://console.groq.com/keys 获取
 LLM_MODEL=llama-3.3-70b-versatile
 DATABASE_URL=postgresql+asyncpg://postgres:password@localhost:5432/aiwf
-
-
-### Environment variables (`.env`)
-DATABASE_URL=postgresql+asyncpg://postgres:password@localhost:5432/aiwf
-REDIS_HOST=localhost
-REDIS_PORT=6379
 LLM_BASE_URL=https://api.groq.com/openai/v1
-LLM_API_KEY=your_groq_api_key # get one free at https://console.groq.com/keys
-
-LLM_MODEL=llama-3.3-70b-versatile
 
 ### Create the table
 ```bash
